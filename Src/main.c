@@ -20,10 +20,12 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "assignement.h"
 
 
 void SystemClock_Config(void);
-uint8_t check_button_state(GPIO_TypeDef* PORT, uint8_t PIN);
+uint8_t checkButtonState(GPIO_TypeDef* PORT, uint8_t PIN, uint8_t edge, uint8_t samples_window, uint8_t samples_required);
+
 
 uint8_t switchState = 0;
 
@@ -33,52 +35,53 @@ int main(void)
   LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG);
   LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
 
-  NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
+  NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_1);
 
   SystemClock_Config();
 
   /*EXTI configuration*/
-  //NVIC_SetPriority(EXTI3_IRQn, 2);
-  //NVIC_EnableIRQ(EXTI3_IRQn);
+  NVIC_SetPriority(EXTI4_IRQn, 2);
+  NVIC_EnableIRQ(EXTI4_IRQn);
   //Set interrupt priority and enable EXTI
-  NVIC->IP[9] |= 2 << 4;
-  NVIC->ISER[0] |= 1 << 9;
+  //NVIC->IP[9] |= 2 << 4;
+  //NVIC->ISER[0] |= 1 << 9;
 
-  /*set EXTI source PA3*/
-  SYSCFG->EXTICR[0] &= ~(0xFU << 12U);
+  /*set EXTI source PB4*/
+  //uint32_t b=SYSCFG->EXTICR[0] &= ~(0xfU << 12U);
+  //SYSCFG->EXTICR[1] &= ~(0xfU << 0U);
+  SYSCFG->EXTICR[1] |= ~(0xeU << 0U);
   //Enable interrupt from EXTI line 3
-  EXTI->IMR |= EXTI_IMR_MR3;
+  EXTI->IMR |= EXTI_IMR_MR4;
   //Set EXTI trigger to falling edge
-  EXTI->RTSR &= ~(EXTI_IMR_MR3);
-  EXTI->FTSR |= EXTI_IMR_MR3;
+  EXTI->RTSR &= ~(EXTI_IMR_MR4);
+  EXTI->FTSR |= EXTI_IMR_MR4;
 
-  /*GPIO configuration, PA3*/
-  RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-  GPIOA->MODER &= ~(GPIO_MODER_MODER3);
-  GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR3);
-  GPIOA->PUPDR |= GPIO_PUPDR_PUPDR3_0;
-
-  /*GPIO configuration, PB3*/
+  /*GPIO configuration, PB4 Button*/
   RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
-  GPIOB->MODER &= ~(GPIO_MODER_MODER3);
-  GPIOB->MODER |= GPIO_MODER_MODER3_0;
-  GPIOB->OTYPER &= ~(GPIO_OTYPER_OT_3);
-  GPIOB->OSPEEDR &= ~(GPIO_OSPEEDER_OSPEEDR3);
-  GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR3);
-
+  GPIOB->MODER &= ~(GPIO_MODER_MODER4);
+  GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR4);
+  GPIOB->PUPDR |= GPIO_PUPDR_PUPDR4_0;
+  /*GPIO configuration, PA4 LED*/
+  RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+  GPIOA->MODER &= ~(GPIO_MODER_MODER4);
+  GPIOA->MODER |= GPIO_MODER_MODER4_0;
+  GPIOA->OTYPER &= ~(GPIO_OTYPER_OT_4);
+  GPIOA->OSPEEDR &= ~(GPIO_OSPEEDER_OSPEEDR4);
+  GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR4);
+  //volatile int EXTICR[0];
 
   while (1)
   {
 	  if(switchState)
 	  {
-		  GPIOB->BSRR |= GPIO_BSRR_BS_3;
+		  GPIOA->BSRR |= GPIO_BSRR_BS_4;
 		  for(uint16_t i=0; i<0xFF00; i++){}
-		  GPIOB->BRR |= GPIO_BRR_BR_3;
+		  GPIOA->BRR |= GPIO_BRR_BR_4;
 		  for(uint16_t i=0; i<0xFF00; i++){}
 	  }
 	  else
 	  {
-		  GPIOB->BRR |= GPIO_BRR_BR_3;
+		  GPIOA->BRR |= GPIO_BRR_BR_4;
 	  }
   }
 
@@ -120,26 +123,47 @@ void SystemClock_Config(void)
 }
 
 
-uint8_t check_button_state(GPIO_TypeDef* PORT, uint8_t PIN)
+uint8_t checkButtonState(GPIO_TypeDef* PORT, uint8_t PIN, uint8_t edge, uint8_t samples_window, uint8_t samples_required)
 {
-	uint8_t button_state = 0, timeout = 0;
+	uint8_t button_state = 0, timeout = 0, count=0;
 
-	while(button_state < 20 && timeout < 50)
+	while(button_state < samples_required && timeout < samples_window)
 	{
-		if(!(PORT->IDR & (1 << PIN))/*LL_GPIO_IsInputPinSet(PORT, PIN)*/)
-		{
-			button_state += 1;
+		if(edge==TRIGGER_RISE){
+			if(!(PORT->IDR & (1 << PIN)))
+			{
+				button_state += 1;
+			}
+			else
+			{
+				button_state = 0;
+			}
+			timeout += 1;
+			LL_mDelay(1);
 		}
-		else
-		{
-			button_state = 0;
+		if(edge==TRIGGER_FALL){
+			if((PORT->IDR & (1 << PIN)))
+			{
+				button_state += 1;
+				count=1;
+			}
+			else
+			{
+				button_state = 0;
+
+			}
+			if(count==1){
+			timeout += 1;
+			LL_mDelay(1);
+			} else{
+				timeout += 0;
+				LL_mDelay(1);
+			}
 		}
 
-		timeout += 1;
-		LL_mDelay(1);
 	}
 
-	if((button_state >= 20) && (timeout <= 50))
+	if((button_state >= samples_required) && (timeout <= samples_window))
 	{
 		return 1;
 	}
@@ -150,15 +174,15 @@ uint8_t check_button_state(GPIO_TypeDef* PORT, uint8_t PIN)
 }
 
 
-void EXTI3_IRQHandler(void)
+void EXTI4_IRQHandler(void)
 {
-	if(check_button_state(GPIOA, 3))
+	if(checkButtonState(GPIO_PORT_BUTTON, GPIO_PIN_BUTTON, TRIGGER_RISE, BUTTON_EXTI_SAMPLES_WINDOW, BUTTON_EXTI_SAMPLES_REQUIRED))
 	{
 		switchState ^= 1;
 	}
 
 	//Clear pending register flag
-	EXTI->PR |= (EXTI_PR_PIF3);
+	EXTI->PR |= (EXTI_PR_PIF4);
 }
 
 /* USER CODE BEGIN 4 */
